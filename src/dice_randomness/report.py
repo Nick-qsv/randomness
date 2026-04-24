@@ -31,6 +31,8 @@ def write_artifacts(result: AuditResult, out_dir: Path, plots: bool = True) -> D
     plot_paths: Dict[str, str] = {}
     if plots:
         plot_paths = _write_plots(result, out_dir)
+        diagram_paths = _write_diagrams(result, out_dir)
+        plot_paths.update(diagram_paths)
         paths.update(plot_paths)
 
     _write_markdown_report(result, out_dir / "report.md", plot_paths)
@@ -207,6 +209,14 @@ def _write_markdown_report(result: AuditResult, path: Path, plot_paths: Dict[str
 
     if plot_paths:
         for label, key in [
+            ("Algorithm flow", "algorithm_flow_graphic"),
+            ("Audit dashboard", "audit_dashboard_graphic"),
+        ]:
+            if key in plot_paths:
+                filename = Path(plot_paths[key]).name
+                lines.extend([f"### {label}", "", f"![{label}]({filename})", ""])
+
+        for label, key in [
             ("Face counts", "face_counts_graphic"),
             ("Ordered outcome z-score heatmap", "outcome_z_heatmap_graphic"),
             ("Rejected byte counts", "rejected_bytes_graphic"),
@@ -252,6 +262,199 @@ def _write_svg_plots(result: AuditResult, out_dir: Path) -> Dict[str, str]:
         "outcome_z_heatmap_graphic": str(outcome_path),
         "rejected_bytes_graphic": str(rejection_path),
     }
+
+
+def _write_diagrams(result: AuditResult, out_dir: Path) -> Dict[str, str]:
+    algorithm_path = out_dir / "algorithm_flow.svg"
+    dashboard_path = out_dir / "audit_dashboard.svg"
+
+    _write_algorithm_flow_svg(result, algorithm_path)
+    _write_dashboard_svg(result, dashboard_path)
+
+    return {
+        "algorithm_flow_graphic": str(algorithm_path),
+        "audit_dashboard_graphic": str(dashboard_path),
+    }
+
+
+def _write_algorithm_flow_svg(result: AuditResult, path: Path) -> None:
+    width = 1280
+    height = 720
+    elements = _svg_header(width, height, "Dice Algorithm Flow")
+
+    steps = [
+        ("Server seed", "Private 32-byte seed committed by hash"),
+        ("Public context", "match id + command id + roll sequence"),
+        ("SHA-256 block", "version + seed + context + block index"),
+        ("Byte stream", "read digest bytes in order"),
+        ("Reject 252-255", "retry until two accepted samples exist"),
+        ("Bucket 0-251", "six equal buckets, 42 values each"),
+        ("Ordered roll", "first accepted face, second accepted face"),
+    ]
+    x_positions = [50, 220, 410, 590, 760, 940, 1110]
+    y = 170
+    box_width = 140
+    box_height = 118
+
+    for index, ((title, subtitle), x) in enumerate(zip(steps, x_positions)):
+        color = "#f4f1de" if index < 2 else "#e6f2f1"
+        if index == 4:
+            color = "#f9e6de"
+        if index == 6:
+            color = "#e7eadf"
+        elements.append(_svg_round_rect(x, y, box_width, box_height, color, "#333", 8))
+        elements.append(_svg_text(x + box_width / 2, y + 35, title, 16, "#111", "middle"))
+        for line_index, line in enumerate(_wrap_words(subtitle, 18)):
+            elements.append(
+                _svg_text(
+                    x + box_width / 2,
+                    y + 64 + line_index * 18,
+                    line,
+                    12,
+                    "#333",
+                    "middle",
+                )
+            )
+        if index < len(steps) - 1:
+            start_x = x + box_width
+            end_x = x_positions[index + 1]
+            elements.append(_svg_arrow(start_x + 8, y + box_height / 2, end_x - 8, y + box_height / 2))
+
+    bucket_y = 410
+    bucket_left = 150
+    bucket_width = 700
+    bucket_height = 58
+    colors = ["#8bb6a3", "#f2cc8f", "#81b29a", "#e07a5f", "#6d597a", "#3d5a80"]
+    for index in range(6):
+        x = bucket_left + index * bucket_width / 6
+        start = index * 42
+        end = start + 41
+        elements.append(
+            _svg_rect(x, bucket_y, bucket_width / 6, bucket_height, colors[index], stroke="#ffffff")
+        )
+        elements.append(_svg_text(x + bucket_width / 12, bucket_y + 24, f"face {index + 1}", 14, "#111", "middle"))
+        elements.append(_svg_text(x + bucket_width / 12, bucket_y + 44, f"{start}-{end}", 12, "#111", "middle"))
+
+    rejected_x = bucket_left + bucket_width + 36
+    elements.append(_svg_round_rect(rejected_x, bucket_y, 180, bucket_height, "#f5c2aa", "#7b3324", 8))
+    elements.append(_svg_text(rejected_x + 90, bucket_y + 25, "reject", 15, "#111", "middle"))
+    elements.append(_svg_text(rejected_x + 90, bucket_y + 45, "252-255", 13, "#111", "middle"))
+
+    elements.append(
+        _svg_text(
+            width / 2,
+            540,
+            "No-bias proof: 252 accepted byte values / 6 faces = 42 values per face",
+            22,
+            "#111",
+            "middle",
+        )
+    )
+    elements.append(
+        _svg_text(
+            width / 2,
+            590,
+            f"This run: {result.total_source_bytes:,} source bytes, {result.rejected_sample_count:,} rejected, {result.total_rolls:,} ordered rolls counted",
+            17,
+            "#333",
+            "middle",
+        )
+    )
+    elements.append("</svg>")
+    path.write_text("\n".join(elements), encoding="utf-8")
+
+
+def _write_dashboard_svg(result: AuditResult, path: Path) -> None:
+    width = 1280
+    height = 760
+    elements = _svg_header(width, height, "Dice Randomness Audit Dashboard")
+    verdict = _verdict(result)
+    expected_reject_pct = result.expected_rejection_rate * 100.0
+    observed_reject_pct = result.observed_rejection_rate * 100.0
+    max_z = max(result.max_abs_face_z, result.max_abs_outcome_z, result.max_abs_rejected_byte_z)
+
+    elements.append(_svg_round_rect(52, 70, 1176, 90, "#f7f7f2", "#333", 8))
+    elements.append(_svg_text(82, 108, f"Verdict: {verdict}", 24, "#111"))
+    elements.append(_svg_text(82, 140, f"Backend: {result.config.backend}", 16, "#333"))
+    elements.append(_svg_text(440, 140, f"Rolls counted: {result.total_rolls:,}", 16, "#333"))
+    elements.append(_svg_text(760, 140, f"Source bytes: {result.total_source_bytes:,}", 16, "#333"))
+
+    _dashboard_metric(
+        elements,
+        52,
+        205,
+        "Rejection rate",
+        observed_reject_pct,
+        expected_reject_pct,
+        "%",
+        "#2f6f73",
+    )
+    _dashboard_metric(
+        elements,
+        472,
+        205,
+        "Max z-score",
+        max_z,
+        6.0,
+        "",
+        "#6d597a",
+    )
+    _dashboard_metric(
+        elements,
+        892,
+        205,
+        "Outcome chi-square",
+        float(result.chi_square_outcomes["statistic"]),
+        float(result.chi_square_outcomes["degrees_of_freedom"]),
+        "",
+        "#8a5a44",
+    )
+
+    face_left = 70
+    face_top = 365
+    face_chart_width = 520
+    face_chart_height = 250
+    expected_face = result.total_dice / 6.0 if result.total_dice else 0.0
+    max_face = max(max(result.face_counts, default=0), expected_face, 1.0)
+    elements.append(_svg_text(face_left, face_top - 22, "Face counts vs expected", 18, "#111"))
+    expected_y = face_top + face_chart_height - (expected_face / max_face) * face_chart_height
+    elements.append(_svg_line(face_left, expected_y, face_left + face_chart_width, expected_y, "#c44e52", 2.5))
+    for index, count in enumerate(result.face_counts):
+        bar_width = 56
+        gap = 34
+        x = face_left + index * (bar_width + gap)
+        bar_height = (count / max_face) * face_chart_height
+        y = face_top + face_chart_height - bar_height
+        elements.append(_svg_rect(x, y, bar_width, bar_height, "#2f6f73"))
+        elements.append(_svg_text(x + bar_width / 2, face_top + face_chart_height + 28, str(index + 1), 14, "#111", "middle"))
+    elements.extend(_svg_axes(face_left, face_top, face_chart_width, face_chart_height, "face", "count"))
+
+    heat_left = 720
+    heat_top = 340
+    cell = 55
+    elements.append(_svg_text(heat_left, heat_top - 22, "Ordered outcome z-scores", 18, "#111"))
+    for row_index, row in enumerate(result.outcome_z_scores):
+        for column_index, z_score in enumerate(row):
+            x = heat_left + column_index * cell
+            y = heat_top + row_index * cell
+            elements.append(_svg_rect(x, y, cell, cell, _z_color(z_score), stroke="#ffffff"))
+            elements.append(_svg_text(x + cell / 2, y + cell / 2 + 5, f"{z_score:.1f}", 12, "#111", "middle"))
+    for index in range(6):
+        elements.append(_svg_text(heat_left + index * cell + cell / 2, heat_top - 8, str(index + 1), 12, "#333", "middle"))
+        elements.append(_svg_text(heat_left - 15, heat_top + index * cell + cell / 2 + 5, str(index + 1), 12, "#333", "middle"))
+
+    elements.append(
+        _svg_text(
+            width / 2,
+            705,
+            "Interpretation: random runs should wobble around expected values; large, repeated z-score drift is the warning sign.",
+            18,
+            "#333",
+            "middle",
+        )
+    )
+    elements.append("</svg>")
+    path.write_text("\n".join(elements), encoding="utf-8")
 
 
 def _write_face_svg(result: AuditResult, path: Path) -> None:
@@ -366,6 +569,24 @@ def _svg_line(x1, y1, x2, y2, stroke, stroke_width) -> str:
     )
 
 
+def _svg_round_rect(x, y, width, height, fill, stroke, radius) -> str:
+    return (
+        f'<rect x="{x:.2f}" y="{y:.2f}" width="{width:.2f}" height="{height:.2f}" '
+        f'rx="{radius:.2f}" ry="{radius:.2f}" fill="{fill}" stroke="{stroke}"/>'
+    )
+
+
+def _svg_arrow(x1, y1, x2, y2) -> str:
+    return "\n".join(
+        [
+            f'<line x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}" '
+            'stroke="#333" stroke-width="2"/>',
+            f'<polygon points="{x2:.2f},{y2:.2f} {x2 - 10:.2f},{y2 - 6:.2f} '
+            f'{x2 - 10:.2f},{y2 + 6:.2f}" fill="#333"/>',
+        ]
+    )
+
+
 def _svg_text(x, y, text, size, fill, anchor="start", rotate=None) -> str:
     transform = f' transform="rotate({rotate} {x:.2f} {y:.2f})"' if rotate is not None else ""
     return (
@@ -387,3 +608,46 @@ def _interpolate_color(start, end, amount: float) -> str:
         for index in range(3)
     ]
     return "#{:02x}{:02x}{:02x}".format(*channels)
+
+
+def _wrap_words(text: str, max_chars: int) -> List[str]:
+    lines: List[str] = []
+    current = ""
+    for word in text.split():
+        proposed = word if not current else f"{current} {word}"
+        if len(proposed) > max_chars and current:
+            lines.append(current)
+            current = word
+        else:
+            current = proposed
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _dashboard_metric(
+    elements: List[str],
+    x: float,
+    y: float,
+    label: str,
+    observed: float,
+    expected: float,
+    unit: str,
+    color: str,
+) -> None:
+    width = 336
+    height = 98
+    elements.append(_svg_round_rect(x, y, width, height, "#ffffff", "#d8d8d8", 8))
+    elements.append(_svg_text(x + 18, y + 30, label, 16, "#111"))
+    elements.append(_svg_text(x + 18, y + 63, f"{observed:.4f}{unit}", 27, color))
+    elements.append(_svg_text(x + 190, y + 63, f"expected {expected:.4f}{unit}", 14, "#555"))
+
+    bar_x = x + 18
+    bar_y = y + 78
+    bar_width = width - 36
+    max_value = max(observed, expected, 1.0)
+    expected_x = bar_x + (expected / max_value) * bar_width
+    observed_width = (observed / max_value) * bar_width
+    elements.append(_svg_rect(bar_x, bar_y, bar_width, 8, "#eeeeee"))
+    elements.append(_svg_rect(bar_x, bar_y, observed_width, 8, color))
+    elements.append(_svg_line(expected_x, bar_y - 4, expected_x, bar_y + 12, "#c44e52", 2))

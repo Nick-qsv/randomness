@@ -69,9 +69,11 @@ PYTHON_BIN=python3.12 ./scripts/spark/bootstrap_checkout.sh
 
 ROLLS=1000000 ./scripts/spark/run_exact_audit.sh
 CANDIDATE_BYTES=1000000000 ./scripts/spark/run_gpu_bucket_audit.sh
+RUNS=5 CANDIDATE_BYTES=1000000000 ./scripts/spark/run_gpu_bucket_suite.sh
 ```
 
 The exact run creates replayable proof samples. The GPU run creates high-volume distribution plots for the bucket/rejection layer.
+The GPU suite repeats independent bucket runs and writes `suite_report.md` plus `suite_dashboard.svg`, which is the better way to check whether a warm heatmap cell repeats or wanders around.
 
 ## Remote Mac-to-Spark Shape
 

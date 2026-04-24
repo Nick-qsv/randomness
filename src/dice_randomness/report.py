@@ -180,6 +180,7 @@ def _write_markdown_report(result: AuditResult, path: Path, plot_paths: Dict[str
         "",
         "The dice algorithm rejects byte values `252..255` and maps `0..251` into six equal buckets.",
         "That means each face owns exactly 42 source byte values. The statistical run checks whether the observed sample behaves like that contract.",
+        "For the ordered-outcome heatmap, one warm or cool cell is normal. The warning sign is repeated large drift across reruns.",
         "",
         "## Headline Numbers",
         "",
@@ -190,7 +191,7 @@ def _write_markdown_report(result: AuditResult, path: Path, plot_paths: Dict[str
         f"- observed rejection rate: `{result.observed_rejection_rate:.6%}`",
         f"- expected rejection rate: `{result.expected_rejection_rate:.6%}`",
         f"- face chi-square: `{result.chi_square_faces['statistic']:.4f}` with df `{result.chi_square_faces['degrees_of_freedom']}`",
-        f"- outcome chi-square: `{result.chi_square_outcomes['statistic']:.4f}` with df `{result.chi_square_outcomes['degrees_of_freedom']}`",
+        f"- outcome chi-square: `{result.chi_square_outcomes['statistic']:.4f}` with df `{result.chi_square_outcomes['degrees_of_freedom']}`; reference mean is the df",
         f"- max absolute face z-score: `{result.max_abs_face_z:.3f}`",
         f"- max absolute ordered-outcome z-score: `{result.max_abs_outcome_z:.3f}`",
         f"- max absolute rejected-byte z-score: `{result.max_abs_rejected_byte_z:.3f}`",
@@ -398,6 +399,7 @@ def _write_dashboard_svg(result: AuditResult, path: Path) -> None:
         6.0,
         "",
         "#6d597a",
+        "watch",
     )
     _dashboard_metric(
         elements,
@@ -408,6 +410,7 @@ def _write_dashboard_svg(result: AuditResult, path: Path) -> None:
         float(result.chi_square_outcomes["degrees_of_freedom"]),
         "",
         "#8a5a44",
+        "mean",
     )
 
     face_left = 70
@@ -634,13 +637,14 @@ def _dashboard_metric(
     expected: float,
     unit: str,
     color: str,
+    reference_label: str = "expected",
 ) -> None:
     width = 336
     height = 98
     elements.append(_svg_round_rect(x, y, width, height, "#ffffff", "#d8d8d8", 8))
     elements.append(_svg_text(x + 18, y + 30, label, 16, "#111"))
     elements.append(_svg_text(x + 18, y + 63, f"{observed:.4f}{unit}", 27, color))
-    elements.append(_svg_text(x + 190, y + 63, f"expected {expected:.4f}{unit}", 14, "#555"))
+    elements.append(_svg_text(x + 190, y + 63, f"{reference_label} {expected:.4f}{unit}", 14, "#555"))
 
     bar_x = x + 18
     bar_y = y + 78

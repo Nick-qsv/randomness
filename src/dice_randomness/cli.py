@@ -8,6 +8,7 @@ import sys
 
 from .audit import run_exact_cpu_audit, run_gpu_bucket_stream_audit
 from .report import write_artifacts
+from .suite import run_gpu_bucket_suite
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,6 +36,17 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--sample-receipts", type=int, default=8)
     audit.add_argument("--out-dir", type=Path, required=True)
     audit.add_argument("--no-plots", action="store_true", help="skip matplotlib PNG generation")
+
+    gpu_suite = subparsers.add_parser(
+        "gpu-suite",
+        help="run repeated independent GPU bucket audits and write a suite report",
+    )
+    gpu_suite.add_argument("--runs", type=int, default=5)
+    gpu_suite.add_argument("--candidate-bytes", type=int, default=1_000_000_000)
+    gpu_suite.add_argument("--chunk-size", type=int, default=100_000_000)
+    gpu_suite.add_argument("--master-seed", default="dice-randomness-gpu-suite-2026-04-24")
+    gpu_suite.add_argument("--out-dir", type=Path, required=True)
+    gpu_suite.add_argument("--no-plots", action="store_true", help="skip per-run plot generation")
     return parser
 
 
@@ -66,6 +78,23 @@ def main(argv=None) -> int:
         print(f"wrote audit artifacts to {args.out_dir}")
         for label, path in sorted(paths.items()):
             print(f"  {label}: {path}")
+        return 0
+
+    if args.command == "gpu-suite":
+        suite = run_gpu_bucket_suite(
+            runs=args.runs,
+            candidate_bytes=args.candidate_bytes,
+            master_seed=args.master_seed,
+            chunk_size=args.chunk_size,
+            out_dir=args.out_dir,
+            plots=not args.no_plots,
+        )
+        print(f"wrote GPU suite artifacts to {args.out_dir}")
+        print(f"  suite_report: {args.out_dir / 'suite_report.md'}")
+        print(f"  suite_dashboard: {args.out_dir / 'suite_dashboard.svg'}")
+        print(f"  suite_summary: {args.out_dir / 'suite_summary.json'}")
+        print(f"  total_rolls: {suite.total_rolls}")
+        print(f"  max_abs_outcome_z_across_runs: {suite.max_abs_outcome_z_across_runs:.3f}")
         return 0
 
     parser.error("missing command")

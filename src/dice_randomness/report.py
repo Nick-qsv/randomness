@@ -196,9 +196,17 @@ def _write_markdown_report(result: AuditResult, path: Path, plot_paths: Dict[str
         f"- max absolute ordered-outcome z-score: `{result.max_abs_outcome_z:.3f}`",
         f"- max absolute rejected-byte z-score: `{result.max_abs_rejected_byte_z:.3f}`",
         "",
-        "## Notes",
+        "## How To Read The Numbers",
         "",
     ]
+    lines.extend(_number_explanation_lines(result))
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "",
+        ]
+    )
     lines.extend(f"- {note}" for note in result.notes)
     lines.extend(
         [
@@ -241,6 +249,40 @@ def _write_markdown_report(result: AuditResult, path: Path, plot_paths: Dict[str
         ]
     )
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _number_explanation_lines(result: AuditResult) -> List[str]:
+    outcome_chi = float(result.chi_square_outcomes["statistic"])
+    outcome_df = int(result.chi_square_outcomes["degrees_of_freedom"])
+    rejection_delta = result.observed_rejection_rate - result.expected_rejection_rate
+    max_outcome_cell, max_outcome_z = _max_outcome_cell(result)
+    max_z = max(result.max_abs_face_z, result.max_abs_outcome_z, result.max_abs_rejected_byte_z)
+
+    return [
+        "Kitchen analogy:",
+        f"- Think of each random byte as an order ticket from `0` to `255`. Tickets `252..255` are prep scraps, so the kitchen throws them away and takes the next ticket. The remaining `252` tickets divide cleanly into six plates: `42` tickets per die face.",
+        f"- The rejection rate says how often the kitchen threw away scrap tickets. This run saw `{result.observed_rejection_rate:.6%}` vs `{result.expected_rejection_rate:.6%}` expected, a difference of `{rejection_delta:+.6%}`.",
+        "",
+        "Nightclub analogy:",
+        "- A z-score is how far one room is from its expected crowd after normal random wobble. A `2.0` z-score is like one room being noticeably busier during a headcount, but not proof that the door staff is steering people there.",
+        f"- The warmest ordered-outcome room in this run was `{max_outcome_cell}` at z `{max_outcome_z:.3f}`. Because we inspect `36` rooms at once, one warm or cool room is normal. The thing to worry about is the same room staying hot across independent nights.",
+        "",
+        "Computer science analogy:",
+        "- The faces and ordered outcomes are buckets, like a hash table or load balancer. Random input should spread work evenly, but every bucket will not have exactly the same load on a finite run.",
+        f"- Chi-square is the total bucket-imbalance score. For ordered outcomes there are `{outcome_df}` degrees of freedom, so `{outcome_df}` is the reference mean, not a target that must be hit exactly. This run scored `{outcome_chi:.4f}`.",
+        f"- The dashboard's max z-score watch line is `6.0`. This run's max z-score was `{max_z:.3f}`, which is well below that review threshold.",
+    ]
+
+
+def _max_outcome_cell(result: AuditResult) -> tuple[str, float]:
+    max_cell = "1,1"
+    max_value = 0.0
+    for row_index, row in enumerate(result.outcome_z_scores, start=1):
+        for column_index, z_score in enumerate(row, start=1):
+            if abs(z_score) > abs(max_value):
+                max_value = z_score
+                max_cell = f"{row_index},{column_index}"
+    return max_cell, max_value
 
 
 def _verdict(result: AuditResult) -> str:

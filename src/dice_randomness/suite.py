@@ -174,6 +174,7 @@ def _write_suite_artifacts(suite: GpuSuiteSummary, out_dir: Path) -> None:
                 ]
             )
 
+    _write_suite_story_svg(suite, out_dir / "suite_story.svg")
     _write_suite_dashboard_svg(suite, out_dir / "suite_dashboard.svg")
     _write_suite_report(suite, out_dir / "suite_report.md")
 
@@ -205,6 +206,8 @@ def _write_suite_report(suite: GpuSuiteSummary, path: Path) -> None:
         "- Treat each ordered dice outcome as a shard in a 36-shard system. One shard having a temporary load spike is expected. Persistent load on the same shard across independent seeds is the signal we are hunting for.",
         "- The chi-square column is the whole-shard imbalance score. Its reference mean is `35` for ordered outcomes because there are 36 buckets and 35 degrees of freedom.",
         "",
+        "![Suite story](suite_story.svg)",
+        "",
         "![Suite dashboard](suite_dashboard.svg)",
         "",
         "## Runs",
@@ -222,6 +225,109 @@ def _write_suite_report(suite: GpuSuiteSummary, path: Path) -> None:
         )
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_suite_story_svg(suite: GpuSuiteSummary, path: Path) -> None:
+    width = 1300
+    height = 820
+    elements = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<rect width="100%" height="100%" fill="#fbfaf6"/>',
+        _svg_text(width / 2, 42, "Why We Run It More Than Once", 28, "#111", "middle"),
+        _svg_text(
+            width / 2,
+            76,
+            "A fair system can have a warm cell tonight. A biased system keeps warming the same cell.",
+            17,
+            "#333",
+            "middle",
+        ),
+    ]
+
+    _story_panel(elements, 54, 112, 382, 620, "Kitchen")
+    _suite_kitchen(elements, 82, 170, suite)
+
+    _story_panel(elements, 462, 112, 382, 620, "Nightclub")
+    _suite_nightclub(elements, 490, 170, suite)
+
+    _story_panel(elements, 870, 112, 382, 620, "Computer science")
+    _suite_computer(elements, 898, 170, suite)
+
+    elements.append("</svg>")
+    path.write_text("\n".join(elements), encoding="utf-8")
+
+
+def _story_panel(elements: List[str], x: float, y: float, width: float, height: float, title: str) -> None:
+    elements.append(_svg_round_rect(x, y, width, height, "#ffffff", "#d9d4c8", 10))
+    elements.append(_svg_text(x + 24, y + 35, title, 22, "#111"))
+
+
+def _suite_kitchen(elements: List[str], x: float, y: float, suite: GpuSuiteSummary) -> None:
+    for index, run in enumerate(suite.runs[:5]):
+        py = y + index * 70
+        plate_color = "#8bb6a3" if run.max_abs_outcome_z < 3.0 else "#e07a5f"
+        elements.append(f'<ellipse cx="{x + 58:.2f}" cy="{py + 24:.2f}" rx="50" ry="24" fill="{plate_color}" stroke="#333"/>')
+        elements.append(_svg_text(x + 58, py + 30, f"run {run.run_index}", 14, "#111", "middle"))
+        elements.append(_svg_text(x + 136, py + 22, f"warmest plate: {run.max_outcome_cell}", 14, "#333"))
+        elements.append(_svg_text(x + 136, py + 44, f"z {run.max_outcome_cell_z:.2f}", 14, "#333"))
+    _svg_suite_paragraph(
+        elements,
+        x,
+        y + 390,
+        310,
+        [
+            "Each run is a dinner service.",
+            "Some plate will usually look a little heavier.",
+            "The question is whether the same plate is heavy every service.",
+        ],
+    )
+
+
+def _suite_nightclub(elements: List[str], x: float, y: float, suite: GpuSuiteSummary) -> None:
+    cell = 22
+    for run_index, run in enumerate(suite.runs[:5]):
+        grid_x = x + (run_index % 2) * 150
+        grid_y = y + (run_index // 2) * 145
+        hot_row, hot_col = [int(part) for part in run.max_outcome_cell.split(",")]
+        elements.append(_svg_text(grid_x, grid_y - 12, f"night {run.run_index}", 13, "#333"))
+        for row in range(6):
+            for col in range(6):
+                fill = "#eef3f3"
+                if row == hot_row - 1 and col == hot_col - 1:
+                    fill = "#eaa49f" if run.max_outcome_cell_z >= 0 else "#9bc0c1"
+                elements.append(_svg_rect(grid_x + col * cell, grid_y + row * cell, cell, cell, fill, "#ffffff"))
+    _svg_suite_paragraph(
+        elements,
+        x,
+        y + 455,
+        310,
+        [
+            "A different hot room each night is ordinary crowd noise.",
+            "The scary picture is the same room glowing again and again.",
+        ],
+    )
+
+
+def _suite_computer(elements: List[str], x: float, y: float, suite: GpuSuiteSummary) -> None:
+    max_z = max(4.0, suite.max_abs_outcome_z_across_runs)
+    for index, run in enumerate(suite.runs[:5]):
+        py = y + index * 58
+        bar_width = 220 * (run.max_abs_outcome_z / max_z)
+        elements.append(_svg_text(x, py + 16, f"run {run.run_index}", 14, "#333"))
+        elements.append(_svg_rect(x + 72, py, 220, 18, "#eeeeee", "none"))
+        elements.append(_svg_rect(x + 72, py, bar_width, 18, "#6d597a", "none"))
+        elements.append(_svg_text(x + 302, py + 15, f"{run.max_abs_outcome_z:.2f}", 14, "#333"))
+    _svg_suite_paragraph(
+        elements,
+        x,
+        y + 340,
+        310,
+        [
+            "Think of the 36 outcomes as 36 shards.",
+            "Load spikes are fine when they move around.",
+            f"This suite saw max z {suite.max_abs_outcome_z_across_runs:.3f} across {suite.run_count} runs.",
+        ],
+    )
 
 
 def _write_suite_dashboard_svg(suite: GpuSuiteSummary, path: Path) -> None:
@@ -285,3 +391,41 @@ def _svg_rect(x, y, width, height, fill, stroke="#dddddd") -> str:
         f'<rect x="{x:.2f}" y="{y:.2f}" width="{width:.2f}" height="{height:.2f}" '
         f'fill="{fill}" stroke="{stroke}"/>'
     )
+
+
+def _svg_round_rect(x, y, width, height, fill, stroke, radius) -> str:
+    return (
+        f'<rect x="{x:.2f}" y="{y:.2f}" width="{width:.2f}" height="{height:.2f}" '
+        f'rx="{radius:.2f}" ry="{radius:.2f}" fill="{fill}" stroke="{stroke}"/>'
+    )
+
+
+def _svg_suite_paragraph(
+    elements: List[str],
+    x: float,
+    y: float,
+    width: float,
+    paragraphs: List[str],
+) -> None:
+    cursor_y = y
+    max_chars = max(24, int(width / 8.5))
+    for paragraph in paragraphs:
+        for line in _wrap_words(paragraph, max_chars):
+            elements.append(_svg_text(x, cursor_y, line, 15, "#333"))
+            cursor_y += 22
+        cursor_y += 9
+
+
+def _wrap_words(text: str, max_chars: int) -> List[str]:
+    lines: List[str] = []
+    current = ""
+    for word in text.split():
+        proposed = word if not current else f"{current} {word}"
+        if len(proposed) > max_chars and current:
+            lines.append(current)
+            current = word
+        else:
+            current = proposed
+    if current:
+        lines.append(current)
+    return lines

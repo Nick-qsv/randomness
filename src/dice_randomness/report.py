@@ -218,6 +218,7 @@ def _write_markdown_report(result: AuditResult, path: Path, plot_paths: Dict[str
 
     if plot_paths:
         for label, key in [
+            ("Picture explanation", "picture_explanation_graphic"),
             ("Algorithm flow", "algorithm_flow_graphic"),
             ("Audit dashboard", "audit_dashboard_graphic"),
         ]:
@@ -308,16 +309,210 @@ def _write_svg_plots(result: AuditResult, out_dir: Path) -> Dict[str, str]:
 
 
 def _write_diagrams(result: AuditResult, out_dir: Path) -> Dict[str, str]:
+    friendly_path = out_dir / "picture_explanation.svg"
     algorithm_path = out_dir / "algorithm_flow.svg"
     dashboard_path = out_dir / "audit_dashboard.svg"
 
+    _write_picture_explanation_svg(result, friendly_path)
     _write_algorithm_flow_svg(result, algorithm_path)
     _write_dashboard_svg(result, dashboard_path)
 
     return {
+        "picture_explanation_graphic": str(friendly_path),
         "algorithm_flow_graphic": str(algorithm_path),
         "audit_dashboard_graphic": str(dashboard_path),
     }
+
+
+def _write_picture_explanation_svg(result: AuditResult, path: Path) -> None:
+    width = 1400
+    height = 1180
+    max_outcome_cell, max_outcome_z = _max_outcome_cell(result)
+    outcome_chi = float(result.chi_square_outcomes["statistic"])
+    outcome_df = int(result.chi_square_outcomes["degrees_of_freedom"])
+    rejection_delta = result.observed_rejection_rate - result.expected_rejection_rate
+
+    elements = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<rect width="100%" height="100%" fill="#fbfaf6"/>',
+        _svg_text(width / 2, 46, "Dice Fairness, Explained With Pictures", 28, "#111", "middle"),
+        _svg_text(
+            width / 2,
+            78,
+            "The math proof is simple; the big run checks that the implementation behaves like the proof.",
+            17,
+            "#333",
+            "middle",
+        ),
+    ]
+
+    _picture_panel(elements, 54, 118, 1292, 300, "1. Kitchen: sort every byte ticket fairly")
+    _draw_kitchen_story(elements, 80, 165, result, rejection_delta)
+
+    _picture_panel(elements, 54, 452, 1292, 300, "2. Nightclub: one busy room is normal")
+    _draw_nightclub_story(elements, 80, 500, result, max_outcome_cell, max_outcome_z)
+
+    _picture_panel(elements, 54, 786, 1292, 320, "3. Computer science: look for persistent bucket imbalance")
+    _draw_computer_story(elements, 80, 842, result, outcome_chi, outcome_df)
+
+    elements.append("</svg>")
+    path.write_text("\n".join(elements), encoding="utf-8")
+
+
+def _picture_panel(elements: List[str], x: float, y: float, width: float, height: float, title: str) -> None:
+    elements.append(_svg_round_rect(x, y, width, height, "#ffffff", "#d9d4c8", 10))
+    elements.append(_svg_text(x + 24, y + 34, title, 21, "#111"))
+
+
+def _draw_kitchen_story(
+    elements: List[str],
+    x: float,
+    y: float,
+    result: AuditResult,
+    rejection_delta: float,
+) -> None:
+    _draw_ticket_stack(elements, x, y + 35, 7, "#7da489", "usable tickets", "bytes 0-251")
+    elements.append(_svg_arrow(x + 200, y + 95, x + 330, y + 95))
+
+    plate_colors = ["#8bb6a3", "#f2cc8f", "#81b29a", "#e07a5f", "#6d597a", "#3d5a80"]
+    plate_x = x + 360
+    for index, color in enumerate(plate_colors):
+        px = plate_x + index * 92
+        elements.append(f'<ellipse cx="{px + 36:.2f}" cy="{y + 105:.2f}" rx="36" ry="19" fill="{color}" stroke="#333"/>')
+        elements.append(_svg_text(px + 36, y + 111, str(index + 1), 17, "#111", "middle"))
+        elements.append(_svg_text(px + 36, y + 152, "42", 15, "#333", "middle"))
+    elements.append(_svg_text(plate_x + 270, y + 188, "Six plates, exactly 42 tickets each", 18, "#111", "middle"))
+
+    scrap_x = x + 980
+    _draw_ticket_stack(elements, scrap_x, y + 44, 4, "#d68a6b", "scraps", "252-255")
+    elements.append(_svg_text(scrap_x + 115, y + 78, "discard and read next byte", 17, "#333"))
+    elements.append(_svg_line(scrap_x + 112, y + 96, scrap_x + 265, y + 96, "#333", 2))
+
+    _svg_paragraph(
+        elements,
+        x,
+        y + 220,
+        1180,
+        [
+            "Kitchen meaning: the recipe is fair before the tasting starts. There are 252 usable byte tickets, and 252 divides perfectly into six equal piles. The GPU run checks that the kitchen is actually following that recipe at scale.",
+            f"This run threw away {result.observed_rejection_rate:.6%} of tickets; expected was {result.expected_rejection_rate:.6%}. Difference: {rejection_delta:+.6%}.",
+        ],
+        16,
+    )
+
+
+def _draw_ticket_stack(
+    elements: List[str],
+    x: float,
+    y: float,
+    count: int,
+    color: str,
+    title: str,
+    subtitle: str,
+) -> None:
+    for index in range(count):
+        tx = x + (index % 4) * 24
+        ty = y + (index // 4) * 30
+        elements.append(_svg_round_rect(tx, ty, 58, 24, color, "#333", 4))
+    elements.append(_svg_text(x + 52, y + 93, title, 16, "#111", "middle"))
+    elements.append(_svg_text(x + 52, y + 116, subtitle, 14, "#333", "middle"))
+
+
+def _draw_nightclub_story(
+    elements: List[str],
+    x: float,
+    y: float,
+    result: AuditResult,
+    max_outcome_cell: str,
+    max_outcome_z: float,
+) -> None:
+    grid_x = x
+    grid_y = y + 20
+    cell = 34
+    row, col = [int(part) for part in max_outcome_cell.split(",")]
+    for row_index in range(6):
+        for col_index in range(6):
+            fill = "#eef3f3"
+            if row_index == row - 1 and col_index == col - 1:
+                fill = "#eaa49f" if max_outcome_z >= 0 else "#9bc0c1"
+            elements.append(_svg_rect(grid_x + col_index * cell, grid_y + row_index * cell, cell, cell, fill, "#ffffff"))
+            elements.append(
+                _svg_text(
+                    grid_x + col_index * cell + cell / 2,
+                    grid_y + row_index * cell + 22,
+                    f"{row_index + 1},{col_index + 1}",
+                    10,
+                    "#333",
+                    "middle",
+                )
+            )
+    elements.append(_svg_text(grid_x + 102, grid_y + 232, "36 rooms = 36 ordered rolls", 15, "#111", "middle"))
+
+    people_x = x + 360
+    for index in range(54):
+        px = people_x + (index % 18) * 18
+        py = y + 30 + (index // 18) * 34
+        color = "#6d597a" if index % 5 else "#c87f72"
+        elements.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="6" fill="{color}"/>')
+    elements.append(_svg_text(people_x + 150, y + 162, "headcount wobble is normal", 18, "#111", "middle"))
+
+    _svg_paragraph(
+        elements,
+        x + 760,
+        y + 30,
+        470,
+        [
+            f"Nightclub meaning: a z-score is a crowd-size readout. The warmest room was outcome {max_outcome_cell} at z {max_outcome_z:.3f}.",
+            "That is like one room being a bit busier tonight. It is not proof the door is biased, because we looked at 36 rooms at once.",
+            "What would worry us: the same room staying hot over multiple independent nights.",
+        ],
+        16,
+    )
+
+
+def _draw_computer_story(
+    elements: List[str],
+    x: float,
+    y: float,
+    result: AuditResult,
+    outcome_chi: float,
+    outcome_df: int,
+) -> None:
+    lb_x = x + 40
+    lb_y = y + 70
+    elements.append(_svg_round_rect(lb_x, lb_y, 170, 86, "#e6f2f1", "#333", 8))
+    elements.append(_svg_text(lb_x + 85, lb_y + 36, "random", 18, "#111", "middle"))
+    elements.append(_svg_text(lb_x + 85, lb_y + 60, "byte stream", 15, "#333", "middle"))
+
+    shard_x = x + 360
+    for index in range(6):
+        sy = y + index * 36
+        elements.append(_svg_arrow(lb_x + 178, lb_y + 43, shard_x - 14, sy + 18))
+        elements.append(_svg_round_rect(shard_x, sy, 86, 28, "#f4f1de", "#333", 5))
+        elements.append(_svg_text(shard_x + 43, sy + 19, f"bucket {index + 1}", 12, "#111", "middle"))
+
+    bar_x = x + 560
+    max_face = max(result.face_counts) if result.face_counts else 1
+    min_face = min(result.face_counts) if result.face_counts else 0
+    span = max(max_face - min_face, 1)
+    for index, count in enumerate(result.face_counts):
+        bar_width = 95 + 90 * ((count - min_face) / span)
+        by = y + index * 36
+        elements.append(_svg_rect(bar_x, by + 3, bar_width, 20, "#2f6f73"))
+        elements.append(_svg_text(bar_x + 205, by + 19, f"face {index + 1}: {count:,}", 13, "#333"))
+
+    _svg_paragraph(
+        elements,
+        x + 850,
+        y + 10,
+        420,
+        [
+            "Computer meaning: random traffic should spread across buckets like a good load balancer. Perfectly equal traffic is not required on one finite run.",
+            f"Chi-square is the total imbalance score. For 36 ordered-outcome buckets, the reference mean is {outcome_df}. This run scored {outcome_chi:.4f}.",
+            "Reruns are the regression test: temporary load spikes should move around, not stick to one bucket.",
+        ],
+        16,
+    )
 
 
 def _write_algorithm_flow_svg(result: AuditResult, path: Path) -> None:
@@ -668,6 +863,23 @@ def _wrap_words(text: str, max_chars: int) -> List[str]:
     if current:
         lines.append(current)
     return lines
+
+
+def _svg_paragraph(
+    elements: List[str],
+    x: float,
+    y: float,
+    width: float,
+    paragraphs: List[str],
+    size: int,
+) -> None:
+    max_chars = max(24, int(width / (size * 0.55)))
+    cursor_y = y
+    for paragraph in paragraphs:
+        for line in _wrap_words(paragraph, max_chars):
+            elements.append(_svg_text(x, cursor_y, line, size, "#333"))
+            cursor_y += size + 7
+        cursor_y += 10
 
 
 def _dashboard_metric(

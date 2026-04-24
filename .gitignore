@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.venv-*/
+.env
+.remote_spark.env
+
+artifacts/dice_bias/*
+!artifacts/dice_bias/.gitkeep

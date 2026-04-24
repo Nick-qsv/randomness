@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dice-randomness-audit"
+version = "0.1.0"
+description = "Audit and visualize the VR Gammon SHA-256 rejection-sampling dice algorithm."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+viz = [
+  "matplotlib>=3.8",
+]
+gpu = [
+  "cupy-cuda12x>=13.0",
+]
+dev = [
+  "pytest>=8.0",
+]
+all = [
+  "matplotlib>=3.8",
+  "cupy-cuda12x>=13.0",
+  "pytest>=8.0",
+]
+
+[project.scripts]
+dice-randomness = "dice_randomness.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
